@@ -78,7 +78,7 @@ class Config():
     CLIP_VALUE = 4.0
     WARMUP_PROP = 0.15
     MIN_WARMUP_STEPS = 5000
-    EPOCHS = 2
+    EPOCHS = 20
     NUM_CLASSES = 2
     LOSS_WEIGHTS = [4.0, 1.0]
 
@@ -419,7 +419,7 @@ def train_worker_main(local_rank):
         if local_rank==1:
             train_loss_record.append(avg_train_loss)
             print(f"    Epoch {epoch_i+1} Train Loss: {avg_train_loss}") 
-            output_dir = f'/mnt/staging/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
+            output_dir = f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             if hasattr(model, "module"):
@@ -471,7 +471,7 @@ def train_worker_main(local_rank):
             'ROC_AUC_Score': roc_auc_record,
             'Average_Precision': average_precision_record
         }
-        with open(f'/mnt/staging/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
+        with open(f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
             json.dump(stats_dict, jfp)
     dist.destroy_process_group()
 
