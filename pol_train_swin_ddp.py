@@ -78,7 +78,7 @@ class Config():
     CLIP_VALUE = 4.0
     WARMUP_PROP = 0.15
     MIN_WARMUP_STEPS = 5000
-    EPOCHS = 20
+    EPOCHS = 12
     NUM_CLASSES = 2
     LOSS_WEIGHTS = [4.0, 1.0]
 
