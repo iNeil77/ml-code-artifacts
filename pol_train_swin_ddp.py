@@ -30,11 +30,11 @@ from sklearn.metrics import (
     roc_auc_score,
     average_precision_score
 )
-from torch_optimizer import DiffGrad
 from transformers import (
     SwinModel,
     SwinPreTrainedModel,
-    get_cosine_schedule_with_warmup
+    get_cosine_schedule_with_warmup,
+    AdamW
 )
 from tqdm import (
     tqdm,
@@ -357,11 +357,13 @@ def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_
         classifier_opt_map_decay + \
         classifier_opt_map_no_decay
 
-    optimizer = DiffGrad(
+    optimizer = AdamW(
         collated_opt_maps,
         lr=config.DEFAULT_LR,
         eps=config.EPSILON,
-        weight_decay=config.WEIGHT_DECAY
+        weight_decay=config.WEIGHT_DECAY,
+        correct_bias=True,
+        no_deprecation_warning=True
     )
 
     num_warmup_steps = (len(train_dataloader.dataset) // config.DATA_SUBSET_BATCH_SIZE_TRAIN) * config.EPOCHS * config.WARMUP_PROP
@@ -396,15 +398,15 @@ def train_worker_main(local_rank):
     roc_auc_record = []
     average_precision_record = []
     exp_time = '_'.join(str(datetime.now()).split(' '))
-    for epoch_i in trange(config.EPOCHS, desc='Epoch Loop', leave=True, disable=local_rank!=1, position=0):
+    for epoch_i in trange(config.EPOCHS, desc='Epoch Loop', leave=True, disable=local_rank!=0, position=0):
         total_train_loss = torch.zeros([1], device=device)
         train_dataloader.sampler.set_epoch(epoch_i)
         model.train()
 
-        for images, labels in tqdm(train_dataloader, desc='Train Loop', leave=False, disable=local_rank!=1, position=1):
+        for images, labels in tqdm(train_dataloader, desc='Train Loop', leave=False, disable=local_rank!=0, position=1):
             images_nv = images.to(device, non_blocking=True)
             labels_nv = labels.to(device, non_blocking=True)
-            model.zero_grad(set_to_none=True)  
+            model.zero_grad(set_to_none=False)  
             loss, logits = model(
                 pixel_values = images_nv,
                 labels = labels_nv
@@ -416,7 +418,7 @@ def train_worker_main(local_rank):
 
         dist.all_reduce(total_train_loss, op=dist.ReduceOp.SUM)
         avg_train_loss = total_train_loss.item() / (int(len(train_dataloader.dataset)/config.DATA_SUBSET_BATCH_SIZE_TRAIN) * config.DATA_SUBSET_BATCH_SIZE_TRAIN)
-        if local_rank==1:
+        if local_rank==0:
             train_loss_record.append(avg_train_loss)
             print(f"    Epoch {epoch_i+1} Train Loss: {avg_train_loss}") 
             output_dir = f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
@@ -431,7 +433,7 @@ def train_worker_main(local_rank):
         total_eval_loss = torch.zeros([1], device=device)
         local_eval_logits = torch.zeros([0,2], device=device)
         local_eval_labels = torch.zeros([0], device=device)
-        for images, labels in tqdm(val_dataloader, desc='Val Loop', leave=False, disable=local_rank!=1, position=1):
+        for images, labels in tqdm(val_dataloader, desc='Val Loop', leave=False, disable=local_rank!=0, position=1):
             images_nv = images.to(device, non_blocking=True)
             labels_nv = labels.to(device, non_blocking=True)
             with torch.no_grad():
@@ -449,7 +451,7 @@ def train_worker_main(local_rank):
         dist.all_gather(global_eval_logits, local_eval_logits)
         global_eval_labels = [torch.zeros_like(local_eval_labels, device=device) for _ in range(world_size)]
         dist.all_gather(global_eval_labels, local_eval_labels)
-        if local_rank==1:
+        if local_rank==0:
             val_loss_record.append(avg_val_loss)
             print(f"    Epoch {epoch_i+1} Val Loss: {avg_val_loss}")
             softmax_layer = nn.Softmax(dim = 1)
@@ -464,7 +466,7 @@ def train_worker_main(local_rank):
             print(f"    Epoch {epoch_i+1} Average Precision: {prc_auc}") 
             print(f"=================================== Epoch {epoch_i+1} Done =====================================")
 
-    if local_rank==1:
+    if local_rank==0:
         stats_dict = {
             'Train_Loss': train_loss_record,
             'Val_Loss': val_loss_record,
