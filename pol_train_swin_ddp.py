@@ -30,11 +30,11 @@ from sklearn.metrics import (
     roc_auc_score,
     average_precision_score
 )
+from torch_optimizer import Lamb
 from transformers import (
     SwinModel,
     SwinPreTrainedModel,
-    get_cosine_schedule_with_warmup,
-    AdamW
+    get_cosine_schedule_with_warmup
 )
 from tqdm import (
     tqdm,
@@ -64,7 +64,7 @@ class Config():
     DATA_SUBSET_BATCH_SIZE_TRAIN = 32
     DATA_SUBSET_BATCH_SIZE_VAL = 32
     DATALOADER_PROCESS_COUNT = 8
-    DATALOADER_PREFETCH_FACTOR = 16
+    DATALOADER_PREFETCH_FACTOR = 32
     DATALOADER_PIN_MEMORY = True
 
     DEFAULT_LR = 5e-4
@@ -76,10 +76,12 @@ class Config():
     WEIGHT_DECAY = 1e-2
     EPSILON = 1e-8
     CLIP_VALUE = 4.0
-    WARMUP_PROP = 0.15
+    WARMUP_PROP = 0.125
     MIN_WARMUP_STEPS = 5000
-    EPOCHS = 12
+    EPOCHS = 20
     NUM_CLASSES = 2
+    NUM_CYCLES = 2.5
+    LABEL_SMOOTHING = 0.1
     LOSS_WEIGHTS = [4.0, 1.0]
 
 
@@ -123,9 +125,10 @@ class BinaryFaceDataset(torch.utils.data.Dataset):
 
 
 class SwinForImageClassificationFixed(SwinPreTrainedModel):
-    def __init__(self, config, loss_weights):
+    def __init__(self, config, loss_weights, label_smoothing):
         super().__init__(config)
         
+        self.label_smoothing = label_smoothing
         self.num_labels = config.num_labels
         self.loss_weights = nn.parameter.Parameter(torch.Tensor(loss_weights), requires_grad=False)
         self.swin = SwinModel(config)
@@ -161,7 +164,7 @@ class SwinForImageClassificationFixed(SwinPreTrainedModel):
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(
                 weight=self.loss_weights,
-                label_smoothing=0.025
+                label_smoothing=self.label_smoothing
             )
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
@@ -295,7 +298,8 @@ def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_
         config.SWIN_CHECKPOINT, 
         num_labels = config.NUM_CLASSES, 
         ignore_mismatched_sizes = True,
-        loss_weights = config.LOSS_WEIGHTS
+        loss_weights = config.LOSS_WEIGHTS,
+        label_smoothing = config.LABEL_SMOOTHING
     )
     print(f"Model locally initialized at local rank: {local_rank}")
 
@@ -357,19 +361,21 @@ def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_
         classifier_opt_map_decay + \
         classifier_opt_map_no_decay
 
-    optimizer = AdamW(
+    optimizer = Lamb(
         collated_opt_maps,
         lr=config.DEFAULT_LR,
         eps=config.EPSILON,
         weight_decay=config.WEIGHT_DECAY,
-        correct_bias=True,
-        no_deprecation_warning=True
+        clamp_value=config.CLIP_VALUE,
+        adam=False,
+        debias=True
     )
 
     num_warmup_steps = (len(train_dataloader.dataset) // config.DATA_SUBSET_BATCH_SIZE_TRAIN) * config.EPOCHS * config.WARMUP_PROP
     scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
         num_warmup_steps=num_warmup_steps if num_warmup_steps > config.MIN_WARMUP_STEPS else 0,
+        num_cycles=config.NUM_CYCLES,
         num_training_steps=int(len(train_dataloader.dataset)/(config.DATA_SUBSET_BATCH_SIZE_TRAIN * world_size)) * config.EPOCHS
     )
     print(f"Optimizers and schedulers configured at local rank: {local_rank}")
