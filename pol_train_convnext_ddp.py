@@ -58,8 +58,8 @@ class Config():
 
     DATA_SUBSET_PATH_TRAIN = "/mnt/staging/Downloads/Final/Train"
     DATA_SUBSET_PATH_VAL = "/mnt/staging/Downloads/Final/Val"
-    DATA_SUBSET_SIZE_TRAIN = 8192
-    DATA_SUBSET_SIZE_VAL = 8192
+    DATA_SUBSET_SIZE_TRAIN = None
+    DATA_SUBSET_SIZE_VAL = None
     DATA_SUBSET_SHUFFLE_TRAIN = True
     DATA_SUBSET_SHUFFLE_VAL = False
     DATA_SUBSET_BATCH_SIZE_TRAIN = 32
@@ -72,17 +72,17 @@ class Config():
     EMBEDDING_LR = 2e-5
     ENCODER_BASE_LR = 5e-4
     ENCODER_LR_MULTIPLIER = 0.95
-    LAYERNORM_LR = 1e-3
-    CLASSIFIER_LR = 4e-3
+    LAYERNORM_LR = 2e-3
+    CLASSIFIER_LR = 7e-3
     WEIGHT_DECAY = 1e-2
     EPSILON = 1e-8
     CLIP_VALUE = 2.0
-    WARMUP_PROP = 0.125
+    WARMUP_PROP = 0.1
     MIN_WARMUP_STEPS = 5000
-    EPOCHS = 2
+    EPOCHS = 50
     NUM_CLASSES = 2
     NUM_CYCLES = 2.5
-    LABEL_SMOOTHING = 0.1
+    LABEL_SMOOTHING = 0.05
     LOSS_WEIGHTS = [4.0, 1.0]
 
 
@@ -465,7 +465,7 @@ def train_worker_main(local_rank):
             prc_auc = average_precision_score(y_true=all_labels, y_score=test_probs[:, 1])
             average_precision_record.append(prc_auc)
             print(f"    Epoch {epoch_i+1} Average Precision: {prc_auc}") 
-            print(f"=================================== Epoch {epoch_i+1} Done =====================================")
+            print(f"====================================== Epoch {epoch_i+1} Done ========================================")
 
     if local_rank==0:
         stats_dict = {
