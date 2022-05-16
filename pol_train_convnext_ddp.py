@@ -51,8 +51,8 @@ from tqdm import (
     frozen=True
 )
 class Config():
-    SWIN_CHECKPOINT = "microsoft/swin-base-patch4-window12-384"
-    EXP_NAME = "Swin_Political"
+    SWIN_CHECKPOINT = "facebook/convnext-large-384-22k-1k"
+    EXP_NAME = "ConvNext_Political"
     SEED = 77
 
     DATA_SUBSET_PATH_TRAIN = "/mnt/staging/Downloads/Final/Train"
