@@ -51,8 +51,9 @@ from tqdm import (
     frozen=True
 )
 class Config():
-    SWIN_CHECKPOINT = "facebook/convnext-large-384-22k-1k"
-    EXP_NAME = "ConvNext_Political"
+    ARCH_NAME = "ConvNeXt"
+    CONVNEXT_CHECKPOINT = "facebook/convnext-large-384-22k-1k"
+    EXP_NAME = "ConvNeXt_Political"
     SEED = 77
 
     DATA_SUBSET_PATH_TRAIN = "/mnt/staging/Downloads/Final/Train"
@@ -284,7 +285,7 @@ def get_dataloaders(config: Config, local_rank, world_size):
 
 def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_rank, world_size):
     model = ConvNextForImageClassificationFixed.from_pretrained(
-        config.SWIN_CHECKPOINT, 
+        config.CONVNEXT_CHECKPOINT, 
         num_labels = config.NUM_CLASSES, 
         ignore_mismatched_sizes = True,
         loss_weights = config.LOSS_WEIGHTS,
@@ -292,9 +293,9 @@ def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_
     )
     print(f"Model locally initialized at local rank: {local_rank}")
 
-    embedding_opt_map_lookup = 'swin.embeddings'
-    encoder_opt_map_lookup = [(i, f'swin.encoder.layers.{i}') for i in range(4)]
-    layernorm_opt_map_lookup = 'swin.layernorm'
+    embedding_opt_map_lookup = 'convnext.embeddings'
+    encoder_opt_map_lookup = [(i, f'convnext.encoder.stages.{i}') for i in range(4)]
+    layernorm_opt_map_lookup = 'convnext.layernorm'
     classifier_opt_map_lookup = 'classifier'
     no_decay_list = ['bias', 'layernorm', 'dense']
 
@@ -421,7 +422,7 @@ def train_worker_main(local_rank):
         if local_rank==0:
             train_loss_record.append(avg_train_loss)
             print(f"    Epoch {epoch_i+1} Train Loss: {avg_train_loss}") 
-            output_dir = f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
+            output_dir = f'/home/ubuntu/Downloads/Models/{config.ARCH_NAME}/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             if hasattr(model, "module"):
@@ -473,7 +474,7 @@ def train_worker_main(local_rank):
             'ROC_AUC_Score': roc_auc_record,
             'Average_Precision': average_precision_record
         }
-        with open(f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
+        with open(f'/home/ubuntu/Downloads/Models/{config.ARCH_NAME}/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
             json.dump(stats_dict, jfp)
     dist.destroy_process_group()
 
