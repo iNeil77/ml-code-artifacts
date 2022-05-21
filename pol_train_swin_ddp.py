@@ -82,7 +82,7 @@ class Config():
     EPOCHS = 20
     NUM_CLASSES = 2
     NUM_CYCLES = 0.5
-    LABEL_SMOOTHING = 0.1
+    LABEL_SMOOTHING = 0.05
     LOSS_WEIGHTS = [4.0, 1.0]
 
 
