@@ -224,6 +224,12 @@ def get_dataloaders(config: Config, local_rank, world_size):
         ToTensorV2(p=1.0)  
     ])
     transform_val = Compose([
+        Resize(
+            height=384,
+            width=384,
+            interpolation=cv2.INTER_CUBIC,
+            p=1.0
+        ),
         Normalize(
             mean=(0.485, 0.456, 0.406),
             std=(0.229, 0.224, 0.225),

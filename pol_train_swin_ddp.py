@@ -30,8 +30,8 @@ from sklearn.metrics import (
     roc_auc_score,
     average_precision_score
 )
-from torch_optimizer import Lamb
 from transformers import (
+    AdamW,
     SwinModel,
     SwinPreTrainedModel,
     get_cosine_schedule_with_warmup
@@ -51,6 +51,7 @@ from tqdm import (
     frozen=True
 )
 class Config():
+    ARCH_NAME = "Swin"
     SWIN_CHECKPOINT = "microsoft/swin-base-patch4-window12-384"
     EXP_NAME = "Swin_Political"
     SEED = 77
@@ -67,20 +68,20 @@ class Config():
     DATALOADER_PREFETCH_FACTOR = 32
     DATALOADER_PIN_MEMORY = True
 
-    DEFAULT_LR = 5e-4
-    EMBEDDING_LR = 2e-5
-    ENCODER_BASE_LR = 5e-4
-    ENCODER_LR_MULTIPLIER = 0.95
-    LAYERNORM_LR = 1e-3
-    CLASSIFIER_LR = 4e-3
+    DEFAULT_LR = 5e-5
+    EMBEDDING_LR = 2e-6
+    ENCODER_BASE_LR = 7e-5
+    ENCODER_LR_MULTIPLIER = 0.9
+    LAYERNORM_LR = 1e-4
+    CLASSIFIER_LR = 4e-4
     WEIGHT_DECAY = 1e-2
     EPSILON = 1e-8
-    CLIP_VALUE = 4.0
+    CLIP_VALUE = 2.0
     WARMUP_PROP = 0.125
     MIN_WARMUP_STEPS = 5000
     EPOCHS = 20
     NUM_CLASSES = 2
-    NUM_CYCLES = 2.5
+    NUM_CYCLES = 0.5
     LABEL_SMOOTHING = 0.1
     LOSS_WEIGHTS = [4.0, 1.0]
 
@@ -135,6 +136,10 @@ class SwinForImageClassificationFixed(SwinPreTrainedModel):
         self.classifier = (
             nn.Linear(self.swin.num_features, config.num_labels) if config.num_labels > 0 else nn.Identity()
         )
+        self.loss_fct = nn.CrossEntropyLoss(
+            weight=self.loss_weights,
+            label_smoothing=self.label_smoothing                
+        )
         self.post_init()
         
     def forward(
@@ -162,11 +167,7 @@ class SwinForImageClassificationFixed(SwinPreTrainedModel):
 
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(
-                weight=self.loss_weights,
-                label_smoothing=self.label_smoothing
-            )
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            loss = self.loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         output = (logits,) + outputs[2:]
         return ((loss,) + output) if loss is not None else output
@@ -234,6 +235,12 @@ def get_dataloaders(config: Config, local_rank, world_size):
         ToTensorV2(p=1.0)  
     ])
     transform_val = Compose([
+        Resize(
+            height=384,
+            width=384,
+            interpolation=cv2.INTER_CUBIC,
+            p=1.0
+        ),
         Normalize(
             mean=(0.485, 0.456, 0.406),
             std=(0.229, 0.224, 0.225),
@@ -361,14 +368,13 @@ def get_model_optimizers_and_schedulers(config: Config, train_dataloader, local_
         classifier_opt_map_decay + \
         classifier_opt_map_no_decay
 
-    optimizer = Lamb(
+    optimizer = AdamW(
         collated_opt_maps,
         lr=config.DEFAULT_LR,
         eps=config.EPSILON,
         weight_decay=config.WEIGHT_DECAY,
-        clamp_value=config.CLIP_VALUE,
-        adam=False,
-        debias=True
+        correct_bias=True,
+        no_deprecation_warning=True
     )
 
     num_warmup_steps = (len(train_dataloader.dataset) // config.DATA_SUBSET_BATCH_SIZE_TRAIN) * config.EPOCHS * config.WARMUP_PROP
@@ -419,6 +425,12 @@ def train_worker_main(local_rank):
             )
             loss.mean().backward()
             total_train_loss += loss.mean()
+            nn.utils.clip_grad.clip_grad_norm_(
+                parameters=model.parameters(),
+                max_norm=config.CLIP_VALUE,
+                norm_type=2.0,
+                error_if_nonfinite=True
+            )
             optimizer.step()
             scheduler.step()
 
@@ -427,7 +439,7 @@ def train_worker_main(local_rank):
         if local_rank==0:
             train_loss_record.append(avg_train_loss)
             print(f"    Epoch {epoch_i+1} Train Loss: {avg_train_loss}") 
-            output_dir = f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
+            output_dir = f'/home/ubuntu/Downloads/Models/{config.ARCH_NAME}/{config.EXP_NAME}_{exp_time}/Epoch-'+str(epoch_i +1)
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             if hasattr(model, "module"):
@@ -470,7 +482,7 @@ def train_worker_main(local_rank):
             prc_auc = average_precision_score(y_true=all_labels, y_score=test_probs[:, 1])
             average_precision_record.append(prc_auc)
             print(f"    Epoch {epoch_i+1} Average Precision: {prc_auc}") 
-            print(f"=================================== Epoch {epoch_i+1} Done =====================================")
+            print(f"====================================== Epoch {epoch_i+1} Done ========================================")
 
     if local_rank==0:
         stats_dict = {
@@ -479,7 +491,7 @@ def train_worker_main(local_rank):
             'ROC_AUC_Score': roc_auc_record,
             'Average_Precision': average_precision_record
         }
-        with open(f'/home/ubuntu/Downloads/Models/Swin/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
+        with open(f'/home/ubuntu/Downloads/Models/{config.ARCH_NAME}/{config.EXP_NAME}_{exp_time}/stats.json', 'w') as jfp:
             json.dump(stats_dict, jfp)
     dist.destroy_process_group()
 
